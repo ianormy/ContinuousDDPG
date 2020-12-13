@@ -33,14 +33,25 @@ class ReplayBuffer:
     
     def sample(self):
         """Randomly sample a batch of experiences from memory."""
-        experiences = random.sample(self.memory, k=self.batch_size)
-
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(device)
-        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
-        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
-
+        sample_ind = np.random.choice(len(self.memory), self.batch_size)
+        # get the selected experiences: avoid using mid list indexing
+        es, ea, er, en, ed = [], [], [], [], []
+        i = 0
+        while i < len(sample_ind):
+            self.memory.rotate(-sample_ind[i])  # rotate the memory up to this index
+            e = self.memory[0]  # sample from the top
+            es.append(e.state)
+            ea.append(e.action)
+            er.append(e.reward)
+            en.append(e.next_state)
+            ed.append(e.done)
+            self.memory.rotate(sample_ind[i])
+            i += 1
+        states = torch.stack(es).squeeze().float().to(device)
+        actions = torch.stack(ea).float().to(device)
+        rewards = torch.from_numpy(np.vstack(er)).float().to(device)
+        next_states = torch.stack(en).squeeze().float().to(device)
+        dones = torch.from_numpy(np.vstack(ed).astype(np.uint8)).float().to(device)
         return (states, actions, rewards, next_states, dones)
 
     def __len__(self):

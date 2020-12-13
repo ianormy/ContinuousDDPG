@@ -12,11 +12,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
-BATCH_SIZE = 128        # minibatch size
+BATCH_SIZE = 256        # minibatch size
 GAMMA = 0.99            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR_ACTOR = 1e-4         # learning rate of the actor 
-LR_CRITIC = 1e-4        # learning rate of the critic
+LR_CRITIC = 5e-3        # learning rate of the critic
 UPDATE_EVERY = 2
 WEIGHT_DECAY = 0        # L2 weight decay
 
@@ -26,18 +26,21 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class DdpgAgent():
     """Interacts with and learns from the environment."""
     
-    def __init__(self, state_size, action_size, random_seed):
+    def __init__(self, state_size, action_size, num_agents=20, random_seed=0):
         """Initialize an Agent object.
         
         Params
         ======
             state_size (int): dimension of each state
             action_size (int): dimension of each action
+            num_agents (int): number of agents
             random_seed (int): random seed
         """
         self.state_size = state_size
         self.action_size = action_size
+        self.num_agents = num_agents
         self.seed = random.seed(random_seed)
+        self.use_gradient_clipping = True
 
         # Actor Network (w/ Target Network)
         self.actor_local = Actor(state_size, action_size, random_seed).to(device)
@@ -50,7 +53,7 @@ class DdpgAgent():
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_CRITIC, weight_decay=WEIGHT_DECAY)
 
         # Noise process
-        self.noise = OUNoise(action_size, random_seed)
+        self.noise = OUNoise((num_agents, action_size), random_seed)
 
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, random_seed)
@@ -63,26 +66,38 @@ class DdpgAgent():
     
     def step(self, state, action, reward, next_state, done):
         """Save experience in replay memory, and use random sample from buffer to learn."""
+        if self.num_agents > 1:
+            for i in range(self.num_agents):
+                self.memory.add(self._toTorch(state[i,:]),
+                                self._toTorch(action[i,:]), 
+                                reward[i],
+                                self._toTorch(next_state[i,:]), 
+                                done[i])
+        else:
+            self.memory.add(self._toTorch(state),
+                            self._toTorch(action), 
+                            reward,
+                            self._toTorch(next_state), 
+                            done)
         self.t_step += 1
-        # Save experience / reward
-        self.memory.add(self._toTorch(state),
-                        self._toTorch(action), reward,
-                        self._toTorch(next_state), done)
         # Learn, if enough samples are available in memory
-        if len(self.memory) > BATCH_SIZE:
-            experiences = self.memory.sample()
-            self.learn(experiences, GAMMA)
+        if len(self.memory) > BATCH_SIZE * self.num_agents:
+            for i in range(self.num_agents): #repeated update per step
+                # sample from memory
+                experiences = self.memory.sample()
+                self.learn(experiences, GAMMA)
 
-    def act(self, state, add_noise=True):
+    def act(self, state, add_noise=True, eps=0.99):
         """Returns actions for given state as per current policy."""
         state = torch.from_numpy(state).float().to(device)
-        self.actor_local.eval()
+        self.actor_local.eval()  # put into eval mode
         with torch.no_grad():
-            action = self.actor_local(state).cpu().numpy()
-        self.actor_local.train()
-        if add_noise:
-            action += self.noise.sample()
-        return np.clip(action.squeeze(), -1 , 1)
+            actions = self.actor_local(state).cpu().numpy()
+        self.actor_local.train()  # put back into training mode
+        if add_noise and np.random.rand() < eps:
+            noise = self.noise.sample()
+            actions += noise
+        return np.clip(actions.squeeze(), -1 , 1)
 
     def reset(self):
         self.noise.reset()
@@ -113,8 +128,9 @@ class DdpgAgent():
         # Minimize the loss
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        # use gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1)
+        if self.use_gradient_clipping:
+            # use gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1)
         self.critic_optimizer.step()
 
         # ---------------------------- update actor ---------------------------- #
@@ -124,7 +140,8 @@ class DdpgAgent():
         # Minimize the loss
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor_local.parameters(), 1)
+        if self.use_gradient_clipping:
+            torch.nn.utils.clip_grad_norm_(self.actor_local.parameters(), 1)
         self.actor_optimizer.step()
 
         if self.t_step % UPDATE_EVERY == 0:
