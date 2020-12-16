@@ -19,6 +19,7 @@ LR_ACTOR = 1e-4         # learning rate of the actor
 LR_CRITIC = 5e-3        # learning rate of the critic
 UPDATE_EVERY = 2
 WEIGHT_DECAY = 0        # L2 weight decay
+BATCH_UPDATE_EVERY = 10
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -26,7 +27,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class DdpgAgent():
     """Interacts with and learns from the environment."""
     
-    def __init__(self, state_size, action_size, num_agents=20, random_seed=0):
+    def __init__(self, state_size, action_size, num_agents=1, random_seed=0):
         """Initialize an Agent object.
         
         Params
@@ -53,7 +54,10 @@ class DdpgAgent():
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_CRITIC, weight_decay=WEIGHT_DECAY)
 
         # Noise process
-        self.noise = OUNoise((num_agents, action_size), random_seed)
+        if self.num_agents > 1:
+            self.noise = OUNoise((num_agents, action_size), random_seed)
+        else:
+            self.noise = OUNoise(action_size, random_seed)
 
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, random_seed)
@@ -82,10 +86,11 @@ class DdpgAgent():
         self.t_step += 1
         # Learn, if enough samples are available in memory
         if len(self.memory) > BATCH_SIZE * self.num_agents:
-            for i in range(self.num_agents): #repeated update per step
-                # sample from memory
-                experiences = self.memory.sample()
-                self.learn(experiences, GAMMA)
+            if self.t_step % BATCH_UPDATE_EVERY == 0:
+                for i in range(self.num_agents): #repeated update per step
+                    # sample from memory
+                    experiences = self.memory.sample()
+                    self.learn(experiences, GAMMA)
 
     def act(self, state, add_noise=True, eps=0.99):
         """Returns actions for given state as per current policy."""
