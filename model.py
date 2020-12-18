@@ -19,9 +19,8 @@ class Actor(nn.Module):
             state_size (int): Dimension of each state
             action_size (int): Dimension of each action
             seed (int): Random seed
-            fc1_units (int): Number of nodes in the first hidden layer
-            fc2_units (int): Number of nodes in the second hidden layer
-            fc3_units (int): Number of nodes in the third hidden layer
+            fc1_units (int): Number of nodes in first hidden layer
+            fc2_units (int): Number of nodes in second hidden layer
         """
         super(Actor, self).__init__()
         self.seed = torch.manual_seed(seed)
@@ -48,7 +47,7 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     """Critic (Value) Model."""
 
-    def __init__(self, state_size, action_size, seed, fcs1_units=128, fc2_units=128):
+    def __init__(self, state_size, action_size, seed, fcs1_units=256, fc2_units=128):
         """Initialize parameters and build model.
         Params
         ======

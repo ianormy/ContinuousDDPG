@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-BUFFER_SIZE = int(1e5)  # replay buffer size
+BUFFER_SIZE = int(1e6)  # replay buffer size
 BATCH_SIZE = 256        # minibatch size
 GAMMA = 0.99            # discount factor
 TAU = 1e-3              # for soft update of target parameters
@@ -42,6 +42,7 @@ class DdpgAgent():
         self.num_agents = num_agents
         self.seed = random.seed(random_seed)
         self.use_gradient_clipping = True
+        print("action_size: {}".format(action_size), flush=True)
 
         # Actor Network (w/ Target Network)
         self.actor_local = Actor(state_size, action_size, random_seed).to(device)
@@ -54,10 +55,7 @@ class DdpgAgent():
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_CRITIC, weight_decay=WEIGHT_DECAY)
 
         # Noise process
-        if self.num_agents > 1:
-            self.noise = OUNoise((num_agents, action_size), random_seed)
-        else:
-            self.noise = OUNoise(action_size, random_seed)
+        self.noise = OUNoise(action_size, random_seed)
 
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, random_seed)
@@ -95,6 +93,19 @@ class DdpgAgent():
     def act(self, state, add_noise=True, eps=0.99):
         """Returns actions for given state as per current policy."""
         state = torch.from_numpy(state).float().to(device)
+        if self.num_agents > 1:
+            actions = np.zeros((self.num_agents, self.action_size))
+            for i in range(self.num_agents):
+                self.actor_local.eval()  # put into eval mode
+                with torch.no_grad():
+                    action = self.actor_local(state[i,:]).cpu().numpy()
+                self.actor_local.train()  # put back into training mode
+                if add_noise and np.random.rand() < eps:
+                    noise = self.noise.sample()
+                    action += noise
+                actions[i] = np.clip(action.squeeze(), -1 , 1)
+            return actions
+        # otherwise this is a single agent
         self.actor_local.eval()  # put into eval mode
         with torch.no_grad():
             actions = self.actor_local(state).cpu().numpy()
